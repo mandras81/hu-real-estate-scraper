@@ -358,3 +358,24 @@ Full E2E pipeline confirmed working for both sources:
 3. ON CONFLICT upsert deduplication ✅
 4. listing_type correctly parsed for both sources ✅
 5. price, area_sqm, rooms, city, GPS all populated ✅
+
+### Backfill complete (2026-06-24 17:25 UTC)
+- **raw_listings**: 200 jofogas + 200 otthonterkep = 400
+- **listings**: 200 + 200 = 400 (100% parsing success)
+- **Available inventory** (sitemap contents):
+  | Source | Sitemap coverage | ~Total URLs |
+  |---|---|---|
+  | otthonterkep | 3 sitemap parts (part_1, part_2, part_3) | **~73K listing URLs** |
+  | jofogas | `sitemap.xml?o=0..16000` (2000 URLs per page) | **hundreds of thousands** |
+
+#### Data quality (per 400 sampled)
+| Field | jofogas | otthonterkep |
+|---|---|---|
+| With title | 180/200 (90%) | 200/200 (100%) |
+| With price | 180/200 (90%) | 200/200 (100%) |
+| With city | 180/200 (90%) | 193/200 (97%) |
+| With GPS | 180/200 (90%) | 0/200 — JS-rendered |
+| With property_type | 162/200 (81%) | 190/200 (95%) |
+| With area_sqm | 179/200 (90%) | 193/200 (97%) |
+| With rooms | 157/200 (79%) | 138/200 (69%) |
+| Listing type (sell:rent) | 163:26 | 164:29 |
