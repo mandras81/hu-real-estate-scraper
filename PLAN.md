@@ -379,3 +379,34 @@ Full E2E pipeline confirmed working for both sources:
 | With area_sqm | 179/200 (90%) | 193/200 (97%) |
 | With rooms | 157/200 (79%) | 138/200 (69%) |
 | Listing type (sell:rent) | 163:26 | 164:29 |
+
+### pgadmin service restart (2026-06-24 17:34 UTC)
+- **Root cause**: Custom FastAPI pgadmin script at `/usr/local/bin/pgadmin_server.py` crashed on startup — `psycopg2` module not found in PATH when run from systemd
+- **Fix**: Installed `psycopg2-binary` via pip, created systemd service at `/etc/systemd/system/pgadmin.service`, enabled for auto-start
+- **Status**: ✅ Running on port 5050, both databases (`real_estate_scraper`, `upwork_pipeline`) accessible
+
+### Sitemap inventory
+| Source | Sitemap location | ~Total listing URLs |
+|---|---|---|
+| otthonterkep | `new.ingatlantajolo.hu/sitemap/sitemap_part_{1..3}.xml` | **~73K** (25K + 25K + 23K) |
+| jofogas | `www.jofogas.hu/sitemap.xml?o={0..16000}` (2000/page) | **hundreds of thousands** |
+
+### Data quality (400 sampled: 200 each source)
+| Field | jofogas | otthonterkep |
+|---|---|---|
+| With title | 180/200 (90%) | 200/200 (100%) |
+| With price | 180/200 (90%) | 200/200 (100%) |
+| With city | 180/200 (90%) | 193/200 (97%) |
+| With GPS | 180/200 (90%) | 0/200 — JS-rendered |
+| With property_type | 162/200 (81%) | 190/200 (95%) |
+| With area_sqm | 179/200 (90%) | 193/200 (97%) |
+| With rooms | 157/200 (79%) | 138/200 (69%) |
+| Listing type (sell:rent) | 163:26 | 164:29 |
+
+**Remaining TODOs** (from chat, 2026-06-24 17:29 UTC):
+- [x] pgadmin restarted (systemd service, was missing psycopg2)
+- [ ] Set up daily cron for scrape + refresh
+- [ ] Fix jofogas property_type mapping (HU→EN)
+- [ ] Geocode otthonterkep listings (0/200 GPS)
+- [ ] Scale scrape beyond 200 per source
+- [ ] Entity resolution across portals
