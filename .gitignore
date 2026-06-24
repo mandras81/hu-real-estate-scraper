@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+otto_scout.png
+ingatlan_aszf.txt
+.env
+*.log
+.nohup*
