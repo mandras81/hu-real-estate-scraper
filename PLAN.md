@@ -184,3 +184,90 @@ HTTP-only (requests) → SSR HTML → JSON-LD + page_data + bootstrap grid parsi
 - [ ] Git init
 - [ ] Daily cron setup
 - [ ] Entity resolution (same property across portals)
+
+## 2026-06-24 — PII Cleanup & Data Integrity Fix
+
+### What changed
+- **Removed private data columns**: `seller_phone` and `address` dropped from `listings` table
+- **Added `src/pii_filter.py`**: Dedicated PII scrubbing module with `scrub_text()` and `scrub_record()`
+- **Updated `src/scrape_otthonterkep.py`**: Removed `seller_name` from result dict, added `scrub_record()` call
+- **Updated `src/scrape_jofogas.py`**: Fixed broken seller_name/seller_type logic, added `scrub_record()` call
+- **Fixed jofogas `listing_type`**: Was hardcoded to `"sell"`, now parses from `__NEXT_DATA__.type.value` (`u`→rent, `s`→sell) with URL fallback
+- **DB migration**: 27 jofogas listings corrected from `sell`→`rent` (case-insensitive URL match)
+
+### PII Filter (`pii_filter.py`)
+| Function | Purpose |
+|---|---|
+| `scrub_text(text)` | Removes emails, phone numbers, and contact-only lines from text fields |
+| `scrub_record(record)` | Scrubs all text fields + strips PII keys from `raw_data` JSON + removes `seller_name` |
+
+### PII patterns blocked
+- **Phones**: `+36 20 123 4567`, `06 20 123 4567`, `06/20/123-4567`, bare numbers near currency
+- **Emails**: `user@domain.tlu` patterns
+- **Contact lines**: Lines starting with `Telefon:`, `Kapcsolat:`, `Cím:`, `E-mail:`, `Mobil:`, etc.
+- **PII keys in raw_data**: `seller_name`, `seller_phone`, `phone`, `email`, `name`, `address`, `contact`, `company_name`, `indiv_name`
+
+### Current DB state
+| Metric | Value |
+|---|---|
+| Total listings | 523 |
+| jofogas | 223 (sell: 196, rent: 27) |
+| otthonterkep | 300 (listing_type: all NULL — known bug) |
+| With phone | 0 |
+| With address | 0 |
+| With seller_name | 0 |
+
+### Schema after cleanup
+```
+listings columns (30 total):
+  id, source, source_url, title, price, price_per_sqm, currency,
+  property_type, listing_type, location_raw, city, district,
+  lat, lng, area_sqm, plot_sqm, rooms, floor, total_floors,
+  condition, heating, year_built, balcony_sqm, description,
+  image_urls, seller_type, listed_at, scraped_at, is_active,
+  checksum, raw_data
+```
+**Removed columns**: ~~seller_phone~~, ~~address~~, ~~seller_name~~
+
+### Known bugs
+1. **otthonterkep `listing_type` always NULL** — `agreement` field parsing in SSR page_data not working for 300 listings. Needs investigation.
+2. **5 jofogas listings defaulted to `sell`** — URL contains neither `kiado_` nor `elado_` keyword. Re-scrape with `__NEXT_DATA__` parser will fix.
+
+### What's missing / next
+- [ ] Fix otthonterkep `listing_type` (agreement field parsing)
+- [ ] Re-scrape otthonterkep to backfill listing_type
+- [ ] Bulk jofogas scrape with fixed listing_type parser (27 rent already corrected)
+- [ ] PII filter unit tests
+- [ ] Git init
+- [ ] Daily cron setup
+- [ ] Entity resolution (same property across portals)
+
+## 2026-06-24 — Architecture reset: dumb collectors + SQL parsing
+
+### What changed
+- **Architecture**: Scrapers are now dumb HTML→JSON collectors. All business logic in PL/pgSQL.
+- **`src/db.py`** — stripped down to connection + clean helpers; removed `upsert_listing()`, `compute_checksum()`
+- **`src/scrape_otthonterkep.py`** — v5 dumb collector: extracts page_data, bootstrap_grid, property_summary, jsonld, images, GPS, seller_h2, page_title → dumps to `raw_listings`
+- **`src/scrape_jofogas.py`** — v5 dumb collector: extracts __NEXT_DATA__ product JSON → dumps to `raw_listings`
+- **SQL layer** (applied via migration):
+  - `raw_listings` staging table (source, source_url, raw_data, scraped_at)
+  - `parse_otthonterkep(JSONB, TEXT)` → structured row
+  - `parse_jofogas(JSONB, TEXT)` → structured row
+  - `refresh_listings()` → transforms all raw → `listings` table (idempotent ON CONFLICT)
+
+### Fixed bugs
+1. **otthonterkep `listing_type` always NULL** — now parsed from `page_data.agreement` via SQL
+2. **jofogas generic `sell` default** — now parsed from `product.type.value` ('s'/'u')
+3. **jofogas city names** — now correctly extracted from `parameters[{key: "city"}]` values array
+4. **jofogas price** — now parsed from `product.price.value` (object format)
+5. **jofogas area/rooms/heating/condition/year_built** — now correctly extracted from new `parameters[]` structure with `key`/`values[{label,value}]` format
+
+### DB state
+- `raw_listings`: fresh staging table
+- `listings`: 30 columns, no PII columns (seller_phone/address/seller_name long dropped)
+- Parse functions and refresh pipeline created via `migrate_001.py`
+
+### TODOs (next)
+- [ ] Backfill: scrape ~521 listings from both sources into raw_listings, run refresh_listings()
+- [ ] Re-add `property_type` mapping in SQL if needed (current jofogas stores HU values)
+- [ ] Add cron job for daily refresh

@@ -839,3 +839,57 @@ v4: requests → sitemap → requests(page) → regex/parsers → DB      (~0.6s
 - `seller_phone` (not on public page, requires login)
 - `district` (Budapest kerület data not exposed in page_data or HTML)
 - `total_floors` (not in SSR, complex "emelet" parsing possible)
+
+---
+
+## §14 — jofogas v4: listing_type Fix + PII Filter (2026-06-24)
+
+### listing_type: Was hardcoded, now parsed
+
+**Bug**: `listing_type` was hardcoded to `"sell"` on line 383 of `scrape_jofogas.py`. All 223 jofogas listings were marked as sell regardless of actual type.
+
+**Fix**: Now reads `__NEXT_DATA__.product.type.value`:
+| value | label | listing_type |
+|---|---|---|
+| `s` | Eladó | `sell` |
+| `u` | Kiadó | `rent` |
+
+**Fallback** (if __NEXT_DATA__ unavailable): URL path matching — `kiado_` → rent, `elado_` → sell.
+
+**DB migration**: 27 listings corrected from `sell` → `rent` (SQL UPDATE with case-insensitive URL match).
+
+### seller_type logic fix
+
+**Before (broken)**:
+```python
+if nd_product3.get("company_ad") and comp_name:
+else:  # syntax error, seller_name never assigned
+if seller_name:  # NameError — variable never defined
+```
+
+**After (fixed)**:
+```python
+if nd_product3.get("company_ad") and comp_name:
+    seller_type = "agent"
+else:
+    seller_type = "private"
+```
+
+### PII filter integration
+
+Both scrapers now call `scrub_record()` from `src/pii_filter.py` before returning the record dict. This ensures:
+- No phone numbers, emails, or contact lines in `title`, `description`, `city`, `district`, `location_raw`
+- No PII keys (`seller_name`, `phone`, `email`, `address`, etc.) in `raw_data` JSON
+- `seller_name` key explicitly removed from record if present
+
+### Schema cleanup
+
+Dropped columns that should never have existed:
+- `seller_phone` — was in schema but never populated
+- `address` — was in schema but never populated
+
+### Remaining legal review items (from §5)
+- [ ] Read otthonterkep ToS (not yet accessed)
+- [ ] Verify jofogas ToS non-commercial use clause doesn't apply
+- [ ] Implement robots.txt compliance check (otthonterkep 403s robots.txt)
+- [ ] Rate limit audit: ensure 2-5s delays are active on jofogas

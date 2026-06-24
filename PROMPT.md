@@ -65,3 +65,28 @@ Provide a dedicated Python processing pipeline executing a cascaded entity resol
 # Code Standards
 - Provide fully functional, complete, and strongly typed Python code (`typing` library).
 - Do not use abstract pseudo-code placeholders, passive comments, or truncation ellipsis blocks (e.g., `# TODO: implement parsing here`). All core normalization, hashing, and parsing logic must be fully explicit.
+
+---
+
+## 🔒 PII / Privacy Requirements (added 2026-06-24)
+
+**All scraped data MUST be free of personal data.** This is non-negotiable.
+
+### Rules
+1. **Never store**: phone numbers, email addresses, personal names, street addresses, or any other personally identifiable information (PII) of private individuals.
+2. **Allowed**: Company/agent names (business data, not personal data), property-level data (price, area, rooms, location, condition).
+3. **Descriptions**: May contain incidental PII (agent phone numbers in description text). These MUST be scrubbed before storage.
+4. **raw_data JSON**: Must never contain keys like `seller_name`, `phone`, `email`, `address`, `contact`.
+5. **Schema**: No columns for personal data. If a column would store PII, remove it.
+
+### Implementation
+- `src/pii_filter.py` — PII scrubbing module
+- Both scrapers call `scrub_record()` before returning data
+- `scrub_text()` removes phones, emails, and contact-only lines
+- `scrub_record()` scrubs all text fields + strips PII keys from raw_data
+
+### Schema audit
+- ✅ `seller_phone` column — DROPPED
+- ✅ `address` column — DROPPED
+- ✅ `seller_name` — not in schema, explicitly removed from records
+- ✅ Only business-safe columns remain: `seller_type` (agent/private), property data, location data
