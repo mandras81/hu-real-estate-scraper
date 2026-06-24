@@ -410,3 +410,8 @@ Full E2E pipeline confirmed working for both sources:
 - [ ] Geocode otthonterkep listings (0/200 GPS)
 - [ ] Scale scrape beyond 200 per source
 - [ ] Entity resolution across portals
+
+### pgadmin fix #2 — per-database routing (2026-06-24 17:53 UTC)
+- **Bug**: `get_db()` always connected to `real_estate_scraper` regardless of which database the user clicked
+- **Fix**: Split DSN into `BASE_DSN` (no database) + per-route `dbname` parameter. All endpoints now pass `db` correctly.
+- **Files**: `/usr/local/bin/pgadmin_server.py` on `10.10.10.103`, systemd service `pgadmin.service`
