@@ -132,7 +132,7 @@ def main():
     listings_before = run_sql("SELECT count(*) FROM listings")[0] or 0
 
     # Step 1+2: scrape
-    jf_ok, jf_dur = run("jofogas scrape", f"python3 src/scrape_jofogas.py {COUNT}")
+    jf_ok, jf_dur = run("jofogas scrape", f"python3 src/scrape_jofogas.py --incremental {COUNT}")
     ot_ok, ot_dur = run("otthonterkep scrape", f"python3 src/scrape_otthonterkep.py {COUNT}")
     ok = jf_ok and ot_ok
 
