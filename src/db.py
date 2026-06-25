@@ -1,12 +1,14 @@
 """Database layer: minimal helpers. No business logic."""
 import re
 import psycopg2
+from vault_creds import get_db_creds, make_pg_kwargs
 
-DB_URL = "postgresql://openclaw:upwork2026@10.10.10.103:5432/real_estate_scraper"
+# Dynamic credentials — fresh lease per process startup
+_CREDS = get_db_creds("scraper-app")
 
 
 def get_conn():
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(**make_pg_kwargs(_CREDS))
     conn.set_client_encoding("UTF8")
     conn.autocommit = False
     return conn

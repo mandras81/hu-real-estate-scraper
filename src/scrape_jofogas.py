@@ -16,10 +16,30 @@ SESSION_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 DELAY_MIN, DELAY_MAX = 2, 5
-SITEMAP_PAGES = ["https://www.jofogas.hu/sitemap.xml?o=%d" % o for o in range(0, 16001, 2000)]
 
 session = requests.Session()
 session.headers.update(SESSION_HEADERS)
+
+
+def discover_sitemap_pages():
+    """Jofogas sitemap ignores the ?o= parameter — returns same ~96 ingatlan URLs regardless of offset.
+    We only need one page. The sitemap only reveals ~96 active listings at any time."""
+    base = "https://www.jofogas.hu/sitemap.xml"
+    print('[jofogas] Using single sitemap page (%s)' % base)
+    return [base]
+
+
+SITEMAP_PAGES = None
+
+
+def get_sitemap_info():
+    global SITEMAP_PAGES
+    if SITEMAP_PAGES is None:
+        SITEMAP_PAGES = discover_sitemap_pages()
+    # Sitemap only exposes one page with ~96 ingatlan URLs (o parameter is ignored)
+    # Total market size is unknown — we track unique URLs collected over time instead
+    ingatlan_visible = 96
+    return 1, ingatlan_visible
 
 
 def polite_delay():
@@ -28,6 +48,9 @@ def polite_delay():
 
 def get_listing_urls(max_urls=100):
     urls = []
+    global SITEMAP_PAGES
+    if SITEMAP_PAGES is None:
+        SITEMAP_PAGES = discover_sitemap_pages()
     for sm_url in SITEMAP_PAGES:
         print("[jofogas] Sitemap ...%s" % sm_url[-20:])
         try:

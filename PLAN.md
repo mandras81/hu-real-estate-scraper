@@ -415,3 +415,124 @@ Full E2E pipeline confirmed working for both sources:
 - **Bug**: `get_db()` always connected to `real_estate_scraper` regardless of which database the user clicked
 - **Fix**: Split DSN into `BASE_DSN` (no database) + per-route `dbname` parameter. All endpoints now pass `db` correctly.
 - **Files**: `/usr/local/bin/pgadmin_server.py` on `10.10.10.103`, systemd service `pgadmin.service`
+
+---
+
+# ═══════════════════════════════════════════════════════════════════
+# APPENDIX: Current State (2026-06-24) — Implementation Progress
+# ═══════════════════════════════════════════════════════════════════
+
+## Architecture
+
+```
+Scraper (dumb HTTP collector → raw JSON)
+    → raw_listings (ON CONFLICT upsert by source_url)
+    → refresh_listings() → parse_otthonterkep() / parse_jofogas()
+    → listings (canonical, 20+ fields)
+    → refresh_consolidation() → properties (golden records)
+```
+
+No Playwright. No API. All business logic in PL/pgSQL.
+
+## Sources & Coverage
+
+**Scope**: Hungarian real estate portals only (jofogas.hu, otthonterkep.hu). Future expansion to other CEST-country real estate sites planned.
+
+| Source       | raw_listings | listings | GPS    | listing_type | area   | rooms | city   |
+|--------------|-------------|----------|--------|-------------|--------|-------|--------|
+| jofogas      | 200         | 200      | 180/200| 189/200      | 179/200| 157/200| 180/200|
+| otthonterkep | 200         | 200      | 192/200| 193/200      | 193/200| 138/200| 193/200|
+| **Total**    | **400**     | **400**  | 372/400| 382/400      | 372/400| 295/400| 373/400|
+
+### Missing per source
+- **jofogas**: 20 no GPS, 20 no listed_at, ~38 no property_type
+- **otthonterkep**: 7 no city → no GPS, 200 no listed_at (SSR limitation), 200 no balcony_sqm
+
+## Migrations Applied
+
+| Migration | Description | Tables Created | Functions Created |
+|-----------|-------------|----------------|-------------------|
+| 001       | raw_listings + parser functions | raw_listings | parse_otthonterkep, parse_jofogas, refresh_listings |
+| 002       | Consolidation layer | properties, property_sources, price_history, property_matches | find_property_matches, auto_confirm_matches, build_or_update_properties, refresh_consolidation, generate_match_checksum |
+| 003       | City geocode + HU→EN property_type | city_coordinates | (modified parse_otthonterkep, parse_jofogas, find_property_matches) |
+
+## Consolidation Pipeline (Dedup)
+
+- **find_property_matches()**: Blocking on city + property_type + area (±30%), tiered scoring (0.3/0.5/0.9)
+- **auto_confirm_matches()**: Three tiers — det≥0.9+text≥0.2, det≥0.5+text≥0.5, det≥0.3+text≥0.7
+- **Current state**: 400 golden records (1:1, no merges yet), **8 pending matches** (Pápa, apartments ~60-70m²)
+- **No auto-confirms** — text similarity ~0.04 across portals (different description copy)
+
+## GPS Strategy
+
+- jofogas: GPS extracted from `__NEXT_DATA__` product JSON (180/200)
+- otthonterkep: **geocoded 117 cities via Nominatim** → city_coordinates lookup table → 0→192/200
+- Budapest districts → centroid (47.4979, 19.0402)
+- 1 unresolved: Tusnádfurdő (Romania, Nominatim q="Tusnádfurdő, Hungary" fails)
+
+## Key Files
+
+| Path | Purpose |
+|------|---------|
+| `src/scrape_jofogas.py` | Dumb collector: HTML → raw JSON via `__NEXT_DATA__` |
+| `src/scrape_otthonterkep.py` | Dumb collector: HTML → raw JSON via page_data/bootstrap_grid/jsonld |
+| `src/db.py` | Minimal: get_conn() + clean_* helpers |
+| `src/pii_filter.py` | Regex-based PII removal before DB insert |
+| `migrations/001_raw_listings.sql` | raw_listings staging + parse functions |
+| `migrations/002_consolidation_layer.sql` | Full consolidation tables + functions |
+| `migrations/003_city_geocode.sql` | City coordinates + GPS fallback + HU→EN mapping |
+
+## TODOs (in priority order)
+
+- [ ] **Cron job** — daily schedule: scrape → refresh_listings() → refresh_consolidation()
+- [ ] **Manual review** — verify the 8 pending Pápa matches (are they really the same property?)
+- [ ] **Lower auto-confirm threshold** — if Pápa 8 are true positives, adjust alpha thresholds
+- [ ] **Fix remaining GPS gaps** — Nominatim-geocode jofogas 20 missing + Tusnádfurdő
+- [ ] **Fix listed_at for otthonterkep** — requires Playwright (JS-rendered date) or skip
+- [ ] **Fix balcony_sqm for otthonterkep** — extract from property_summary "Erkély"/"Terasz"/"Loggia"
+- [ ] **Analytics views** — price trends, city coverage, field completeness over time
+- [ ] **Git init & push** — version the project
+- [ ] **Restart pgadmin** — service down on postgres host (port 5050)
+
+---
+
+## 2026-06-25 — Documentation update + pipeline state refresh
+
+### What happened
+- Full documentation created: `README.md` with architecture overview, live data quality table, table reference, pipeline flow, source details, legal status, and remaining TODOs.
+- PLAN.md summary appendix updated with current live state.
+
+### Current DB state (2026-06-25 04:31 UTC)
+
+| Source       | listings | GPS    | Listing Type | Property Type | City   | Area   | Rooms | Condition | Heating | Year Built | Images | Seller Type | Floor | Balcony |
+|--------------|----------|--------|-------------|--------------|--------|--------|-------|-----------|---------|------------|--------|-------------|-------|---------|
+| jofogas      | 180      | 180    | 180         | 162          | 180    | 179    | 157   | 162       | 161     | 0          | 162    | 180         | 82    | 161     |
+| otthonterkep | 199      | 191    | 192         | 189          | 192    | 192    | 137   | 192       | 92      | 0          | 145    | 192         | 35    | 0       |
+| **Total**   | **379**  | **371**| **372**     | **351**      | **372**| **371**| **294**| **354**  | **253** | **0**      | **307**| **372**     | **117**| **161** |
+
+- **Listings in DB**: 379 (180 jofogas, 199 otthonterkep)
+- **raw_listings staging**: 423 rows (new scrapes from today accumulate)
+- **properties**: 400 golden records (all 1:1, no cross-portal merges yet)
+- **property_matches**: 0 (all 8 Pápa false positives were rejected)
+
+### Listing types breakdown
+| Type | Count | % |
+|------|-------|---|
+| sell | 320   | 84.4% |
+| rent | 52    | 13.7% |
+| NULL | 7     | 1.8% |
+
+### TODOs (updated)
+- [x] **Cron job** — daily schedule at 05:00 CET via system crontab (`daily_pipeline.sh`)
+- [x] **Manual review** — 8 Pápa matches rejected (all false positives)
+- [x] **GPS gaps** — 20 dead jofogas URLs deleted. Tusnádfurdő→Băile Tușnad geocoded. 180/180 jofogas GPS ✅
+- [x] **Parser fixes** — year_built COALESCE order fixed, balcony_sqm for jofogas (161/180), property_type for jofogas HU→EN mapped
+- [x] **Git init** — 6 commits, initial push pending
+- [x] **pgadmin restart** — systemd service on postgres host, per-database routing fixed
+- [ ] **Analytics views** — price trends, city coverage, field completeness over time
+- [ ] **Git push** — push to remote
+- [ ] **Scale scraping** — increase from 200 to 500+ per source
+- [ ] **Auto-confirm improvements** — adjust thresholds after real match data
+- [ ] **Fix year_built** — 0/379 parsed from dumb-collector data (SQL or collector issue)
+- [ ] **Fix listed_at for otthonterkep** — SSR-only, needs investigation
+- [ ] **Fix balcony_sqm for otthonterkep** — 0/199 (all jofogas: 161/180)

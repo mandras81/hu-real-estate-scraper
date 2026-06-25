@@ -42,24 +42,37 @@ HTTP (requests) → SSR HTML → raw JSON → raw_listings (staging table)
 
 ---
 
-## Current State (2026-06-25)
+## Current State (2026-06-25 — Audit Update)
 
-| Source       | listings | GPS    | Listing Type | Property Type | City   | Area   | Rooms | Condition | Heating |
-|--------------|----------|--------|-------------|--------------|--------|--------|-------|-----------|---------|
-| jofogas      | 180      | 180    | 180         | 162          | 180    | 179    | 157   | 162       | 161     |
-| otthonterkep | 199      | 191    | 192         | 189          | 192    | 192    | 137   | 192       | 92      |
-| **Total**   | **379**  | **371**| **372**     | **351**      | **372**| **371**| **294**| **354**  | **253** |
+| Source       | Active Market | Collected | Strategy | Time to Full |
+|--------------|:------------:|:--------:|----------|:-----------:|
+| **jofogas**  | ~6,000 (lakás+ház+garázs) | 276 | Listing page sweep (`/{cat}?o=N`) | ~1 day |
+| **otthonterkep** | ~70,000 (96% of 73K live) | 199 | Sitemap crawl 5K/day | ~14 days |
+| **Total**    | **~76,000** | **475** | Polite daily pipeline (~2.5h) | **~14 days** |
 
-- **raw_listings**: 423 rows (unprocessed scrapes from today)
-- **properties**: 400 golden records (1:1, no cross-portal merges yet)
-- **property_matches**: 0 (all 8 Pápa false positives rejected ⛔)
+### Field Coverage (% non-null)
+| Field | jofogas (276) | otthonterkep (199) | Notes |
+|-------|:--------:|:----------:|-------|
+| price | 99.6% | 100% | ✅ |
+| area_sqm | 99.3% | 96.5% | ✅ |
+| rooms | 86.6% | 68.8% | 🟡 |
+| condition | 88.8% | 96.5% | ✅ |
+| **year_built** | **0%** | **13.1%** | 🔴 broken |
+| heating | 88.4% | 46.2% | 🟡 |
+| **listed_at** | **100%** | **0%** | 🔴 broken |
+| lat/lng | 100% | 96.5% | ✅ |
+| balcony_sqm | 88.4% | 1% | 🟡 |
+| **total_floors** | **0%** | **0%** | 🔴 missing |
+| floor | 44.2% | 17.6% | 🟡 |
 
 ### Listing Types
 | Type | Count |
 |------|-------|
-| sell | 320   |
-| rent | 52    |
-| NULL | 7     |
+| sell | 320 |
+| rent | 52 |
+| NULL | 7 |
+
+### raw_listings staging: 423 rows
 
 ---
 
@@ -138,9 +151,22 @@ Logs: `/tmp/realestate-cron.log`
 
 ## Remaining TODOs
 
+### Pipeline
+- [ ] **jofogas rewrite**: Listing-page scraping (`/{lakas,haz,garazs}?o=N`) instead of sitemap
+- [ ] **otthonterkep acceleration**: Bump to 5K/day → completes ~14 days
+- [ ] **New listing discovery**: Daily jofogas listing page diff
+
+### Data quality
+- [ ] **Fix year_built** (0% both — parser bug)
+- [ ] **Fix listed_at for otthonterkep** (0% — SSR date extraction)
+- [ ] **Fix balcony_sqm for otthonterkep** (1% — property_summary)
+- [ ] **Fix total_floors** (0% both)
+- [ ] **Fix district** (0% both)
+- [ ] **Fix floor** (44%/18%)
+- [ ] **Fix heating** (88%/46%)
+
+### Upstream
 - [ ] **Analytics views** — price trends, city coverage, field completeness
-- [ ] **Git push** — push to remote
-- [ ] **Scale scraping** — increase from 200 to 500+ per source
-- [ ] **Auto-confirm improvements** — adjust thresholds after real match data
-- [ ] **Fix year_built** — 0/379 parsed from the dumb-collector data
-- [ ] **Fix listed_at for otthonterkep** — SSR-only, needs investigation
+- [ ] **Git push** — remote
+- [ ] **Auto-confirm improvements** — adjust thresholds
+- [ ] **Entity resolution** — cross-portal dedup after full inventory

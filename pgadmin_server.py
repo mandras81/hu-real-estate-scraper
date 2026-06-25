@@ -15,13 +15,21 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 import uvicorn
 
+import sys
+sys.path.insert(0, os.path.dirname(__file__) + "/src")
+from vault_creds import get_db_creds, make_dsn
+
+_SCRAPER_CREDS = get_db_creds("scraper-app")
+_UPWORK_CREDS = get_db_creds("upwork-app")
+
 DB_ALIASES = {
-    "real_estate": "postgresql://openclaw:upwork2026@10.10.10.103:5432/real_estate_scraper",
-    "upwork": "postgresql://openclaw:upwork2026@10.10.10.103:5432/upwork_pipeline",
+    "real_estate": make_dsn(_SCRAPER_CREDS),
+    "upwork": make_dsn(_UPWORK_CREDS),
 }
 
 def get_db(dsn=None):
-    if not dsn: dsn = list(DB_ALIASES.values())[0]
+    if not dsn:
+        dsn = list(DB_ALIASES.values())[0]
     conn = psycopg2.connect(dsn, connect_timeout=5)
     conn.set_client_encoding("UTF8")
     return conn
