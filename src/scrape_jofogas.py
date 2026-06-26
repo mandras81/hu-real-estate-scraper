@@ -199,7 +199,7 @@ def get_new_urls(max_urls=None, cat_filter=None):
         new_urls = new_urls[:max_urls]
     return new_urls
 
-def main(max_listings=None):
+def main(max_listings=None, incremental=False):
     print(f"{'='*60}")
     print("JOFOGAS v6 — listing-page sweep (replaces broken sitemap)")
     print(f"{'='*60}\n")
