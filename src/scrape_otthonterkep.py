@@ -35,9 +35,9 @@ def get_listing_urls(max_urls=100):
             url = loc.text.strip()
             if url and "/ingatlan/" in url:
                 urls.append(url)
-        if len(urls) >= max_urls:
+        if max_urls and len(urls) >= max_urls:
             break
-    return urls[:max_urls]
+    return urls[:max_urls] if max_urls else urls
 
 
 def extract_raw_data(html, url):
@@ -133,7 +133,28 @@ def scrape_listing(url):
         return None
 
 
-def main(max_listings=50):
+
+def get_existing_urls():
+    """Return set of source_urls already in raw_listings for otthonterkep."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT source_url FROM raw_listings WHERE source='otthonterkep'")
+    urls = set(r[0] for r in cur.fetchall())
+    cur.close(); conn.close()
+    return urls
+
+
+def get_new_urls(max_urls=None):
+    """Discover all sitemap URLs, filter to unseen, return sorted."""
+    all_urls = get_listing_urls(max_urls=None)
+    existing = get_existing_urls()
+    new_urls = [u for u in all_urls if u not in existing]
+    print(f'[otto] incremental: {len(all_urls)} total, {len(new_urls)} new, {len(existing)} existing')
+    if max_urls:
+        new_urls = new_urls[:max_urls]
+    return new_urls
+
+def main(max_listings=50, incremental=False):
     print(f"{'='*60}")
     print("OTTHONTERKEP v5 — dumb collector (raw JSON only)")
     print(f"{'='*60}\n")
