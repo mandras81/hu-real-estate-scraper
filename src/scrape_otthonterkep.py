@@ -154,24 +154,36 @@ def get_new_urls(max_urls=None):
         new_urls = new_urls[:max_urls]
     return new_urls
 
+
 def main(max_listings=50, incremental=False):
     print(f"{'='*60}")
     print("OTTHONTERKEP v5 — dumb collector (raw JSON only)")
     print(f"{'='*60}\n")
-    print("[otto] Fetching sitemap URLs...")
-    listing_urls = get_listing_urls(max_listings)
-    print(f"[otto] Got {len(listing_urls)} listing URLs\n")
+
+    if incremental:
+        print("[otto] Incremental mode: fetching unseen URLs only...")
+        listing_urls = get_new_urls(max_urls=max_listings)
+    else:
+        print("[otto] Fetching sitemap URLs...")
+        listing_urls = get_listing_urls(max_listings)
+
+    if not listing_urls:
+        print("[otto] No new URLs to scrape. Exiting.")
+        return 0
+
+    print(f"[otto] Got {len(listing_urls)} listing URLs to scrape\n")
 
     conn = get_conn()
     cur = conn.cursor()
-    scraped = inserted = 0
+    scraped = inserted = skipped = 0
     t_start = time.time()
 
     for i, url in enumerate(listing_urls, 1):
         t0 = time.time()
-        print(f"[{i}/{max_listings}] ...{url[-40:]}")
+        print(f"[{i}/{len(listing_urls)}] ...{url[-40:]}")
         raw_data = scrape_listing(url)
         if not raw_data:
+            skipped += 1
             print("  x failed\n")
             continue
 
@@ -187,6 +199,7 @@ def main(max_listings=50, incremental=False):
             inserted += 1
         except Exception as e:
             conn.rollback()
+            skipped += 1
             print(f"  x DB error: {e}")
             continue
 
@@ -199,14 +212,17 @@ def main(max_listings=50, incremental=False):
 
     et = time.time() - t_start
     print(f"\n{'='*60}")
-    print(f"DONE: {scraped} scraped, {inserted} inserted/updated")
+    print(f"DONE: {scraped} scraped, {inserted} inserted/updated, {skipped} skipped")
     print(f"Time: {et:.0f}s ({et/max(scraped,1):.1f}s avg)")
     print(f"{'='*60}")
 
     cur.close()
     conn.close()
+    return 0 if scraped > 0 else 1
 
 
 if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 50
-    main(n)
+    inc = "--incremental" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    n = int(args[0]) if args else None
+    main(n, incremental=inc)
