@@ -133,7 +133,7 @@ def main():
 
     # Step 1+2: scrape
     jf_ok, jf_dur = run("jofogas scrape", f"python3 src/scrape_jofogas.py --incremental {COUNT}")
-    ot_ok, ot_dur = run("otthonterkep scrape", f"python3 src/scrape_otthonterkep.py {COUNT}")
+    ot_ok, ot_dur = run("otthonterkep scrape", f"python3 src/scrape_otthonterkep.py --incremental {COUNT}")
     ok = jf_ok and ot_ok
 
     # Step 3: refresh_listings
