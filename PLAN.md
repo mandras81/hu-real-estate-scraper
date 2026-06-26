@@ -536,3 +536,50 @@ No Playwright. No API. All business logic in PL/pgSQL.
 - [ ] **Fix year_built** — 0/379 parsed from dumb-collector data (SQL or collector issue)
 - [ ] **Fix listed_at for otthonterkep** — SSR-only, needs investigation
 - [ ] **Fix balcony_sqm for otthonterkep** — 0/199 (all jofogas: 161/180)
+
+---
+
+## 2026-06-25 — jofogas v6: Listing-Page Sweep + Parser Deep Fix
+
+### What changed
+- **`src/scrape_jofogas.py`** → v6 rewrite (replaces v5 sitemap approach)
+  - Discovers real listing pages: `/{lakas,haz,garazs}?o=N`
+  - Market: ~5K lakás (201 pg), ~940 ház (38 pg), ~90 garázs (4 pg) = **~6,000 active**
+  - Sorted newest-first by ad ID for fresh-data parallelism
+  - Incremental mode: `--incremental` flag skips already-collected URLs
+  - Tuned polite delays: page sweep 1.5-3s, listing scrape 1.0-2.5s
+- **SQL parse_jofogas**: Two key parser fixes
+  - Added `floor_count` → `total_floors` (was 0%, now 38.2% on existing data)
+  - Added `building_date` → `year_built` (was 0%, now 11.6% on existing data)
+- **`src/daily_pipeline.py`**: jofogas now runs with `--incremental`
+- **`src/vault_creds.py`**: New file — Vault credential helper for dynamic PG roles
+- **`src/db.py`**: Switched from hardcoded URL to Vault dynamic creds
+- **`pgadmin_server.py`**: Vault dynamic creds for both DB routes
+
+### Full backfill launched
+- PID `57110` began scraping all ~6,000 jofogas listings
+- Crashed at 606/6000 (unknown reason, likely network timeout or OOM)
+- Restarted as `--incremental` — will pick up remaining ~5,400 via background job
+- `893` jofogas listings in DB so far (617 new after v6 rewrite)
+
+### Current DB state (2026-06-26 03:52 UTC)
+
+| Source | raw_listings | listings | price | area | rooms | lt | pt | cond | heat | yb | tf | floor | balc | gps | la |
+|--------|:----------:|:-------:|:----:|:----:|:----:|:--:|:--:|:----:|:----:|:--:|:--:|:-----:|:----:|:---:|:--:|
+| jofogas | 893 | 893 | 892 | 890 | 849 | 893 | 893 | 842 | 844 | 71 | 195 | 645 | 851 | 893 | 893 |
+| otthonterkep | 199 | 199 | 199 | 192 | 137 | 192 | 189 | 192 | 92 | 26 | 0 | 35 | 2 | 192 | 0 |
+| **Total** | **1,092** | **1,092** | 1,091 | 1,082 | 986 | 1,085 | 1,082 | 1,034 | 936 | 97 | 195 | 680 | 853 | 1,085 | 893 |
+
+### Parser fix impact
+| Field | Before (301 jofogas) | After fix | New data (893) |
+|-------|:-------------------:|:--------:|:--------------:|
+| total_floors | 0% | 38.2% | 195 (21.8%) |
+| year_built | 0% | 11.6% | 71 (8.0%) |
+| floor | 48.8% | 48.8% | 645 (72.2%) ⇐ better coverage in full market |
+| heating | 89.4% | 89.4% | 844 (94.5%) |
+| balcony_sqm | 88.4% | 88.4% | 851 (95.3%) |
+
+### Infrastructure
+- Vault dynamic creds for scraper-app role deployed across all scripts
+- Git: 8 commits pushed to `main` on GitHub
+- Otherwise: pgadmin running, daily cron at 05:00 CET
