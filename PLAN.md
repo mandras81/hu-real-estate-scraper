@@ -583,3 +583,92 @@ No Playwright. No API. All business logic in PL/pgSQL.
 - Vault dynamic creds for scraper-app role deployed across all scripts
 - Git: 8 commits pushed to `main` on GitHub
 - Otherwise: pgadmin running, daily cron at 05:00 CET
+
+---
+
+## 2026-06-26 — otthonterkep Backfill Launch + Parser Overhaul
+
+### What happened
+- **otthonterkep `--incremental` mode**: New CLI flag avoids re-scraping existing URLs
+  - `get_new_urls(max_urls=N)` fetches full 73K sitemap → filters against DB → returns only unseen
+  - `--incremental` in `__main__` argparse
+- **5K backfill launched** at 08:34 UTC (PID 102533, ~45 listings/min, ~10MB RAM idle)
+  - Scraping sequentially with 0.4-0.6s per listing
+  - Log buffering resolved — real-time progress visible in `/tmp/otthonterkep_backfill.log`
+- **Parser overhaul** (multiple inline fixes, formalized as migration 005):
+  1. `Belső szintek` → **total_floors** (was incorrectly mapped to `floor` — 0→603 records)
+  2. `TERÜLET` → **plot_sqm** (was incorrectly mapped to `area_sqm` — recovered 227 records)
+  3. `area_sqm` sanity cap: **5–5000 m²** (rejects bogus plot-sized values like 10,000,000 m²)
+  4. `price_per_sqm` guard: cap at **10M HUF/sqm** to avoid NUMERIC overflow
+  5. **Removed `fallback_price`** — was catching wrong numbers from HTML regex
+  6. Column widening: `price_per_sqm` NUMERIC(8,1)→12,1, `area_sqm`→10,1, `plot_sqm`→12,1
+  7. **Removed `_fix_year_built.py`** — one-shot script already committed
+- **`daily_pipeline.py`**: Updated otthonterkep call to use `--incremental`
+- **Parser fix applied**: `parse_jofogas` `building_date`→`year_built` uses `label` instead of `value` (confirmed working: 9.7% coverage on jofogas fresh data)
+
+### DB state (2026-06-26 09:16 UTC, backfill running)
+| Source | raw_listings | listings | price | area | rooms | lt | pt | cond | heat | yb | tf | floor | balc | gps | la | plot |
+|--------|:----------:|:-------:|:----:|:----:|:----:|:--:|:--:|:----:|:----:|:--:|:--:|:-----:|:----:|:---:|:--:|:---:|
+| jofogas | 1,784 | 1,784 | 99.9% | 99.8% | 97.5% | 100% | 100% | 96.4% | 96.9% | 9.7% | 10.9% | 86% | 97.6% | 100% | 100% | 0% |
+| otthonterkep | 1,815 | 1,616 | 98.8% | 79.3% | 83.9% | 99% | 98.6% | 99% | 58.7% | 5.7% | 37.3% | 0% | 0.2% | 62.8% | 0% | 14% |
+| **Total** | **3,599** | **3,400** | | | | | | | | | | | | | |
+
+### Git
+- 9 commits today (main@505e2ae)
+- `migrations/005_parser_fixes.sql` — documents column widening + view recreation
+- Pushed to GitHub
+
+### Remaining gaps (still open)
+1. **Otthonterkep backfill**: ~5K target, ~1.8K/5K done, ~70 min remaining
+2. **Jofogas backfill**: ~4,200 remaining (crashed at 606 on v6 launch)
+3. **listed_at for otthonterkep**: 0% — SSR gap, needs Playwright (no date in HTML)
+4. **balcony_sqm for otthonterkep**: 0.2% — SSR gap, needs Playwright
+5. **year_built for both**: ~7-9% — low data availability
+6. **Entity resolution**: Still 0 cross-portal matches (496 properties, 1:1 ratio)
+7. **GPS for otthonterkep**: 62.8% — backfill adding unmatched cities
+
+---
+
+## 2026-06-26 — otthonterkep Backfill Launch + Parser Overhaul
+
+### What happened
+- **otthonterkep `--incremental` mode**: New CLI flag avoids re-scraping existing URLs
+  - `get_new_urls(max_urls=N)` fetches full 73K sitemap → filters against DB → returns only unseen
+  - `--incremental` in `__main__` argparse
+- **5K backfill launched** at 08:34 UTC (PID 102533, ~45 listings/min, ~10MB RAM idle)
+  - Scraping sequentially with 0.4-0.6s per listing
+  - Log buffering resolved — real-time progress visible in `/tmp/otthonterkep_backfill.log`
+- **Parser overhaul** (multiple inline fixes, formalized as migration 005):
+  1. `Belső szintek` → **total_floors** (was incorrectly mapped to `floor` — 0→603 records)
+  2. `TERÜLET` → **plot_sqm** (was incorrectly mapped to `area_sqm` — recovered 227 records)
+  3. `area_sqm` sanity cap: **5–5000 m²** (rejects bogus plot-sized values like 10,000 m²)
+  4. `price_per_sqm` guard: cap at **10M HUF/sqm** to avoid NUMERIC overflow
+  5. **Removed `fallback_price`** — was catching wrong numbers from HTML regex
+  6. Column widening: `price_per_sqm` → NUMERIC(12,1), `area_sqm` → NUMERIC(10,1), `plot_sqm` → NUMERIC(12,1)
+  7. **Removed `_fix_year_built.py`** — one-shot script already committed (HEAD: 77818e9)
+- **`daily_pipeline.py`**: Updated otthonterkep call to use `--incremental`
+- **Parser fixes confirmed**:
+  - `parse_jofogas` `building_date`→`year_built` uses `label` (9.7% jofogas coverage)
+  - `parse_otthonterkep` `Belső szintek`→`total_floors` (37.3% otthonterkep coverage)
+  - `parse_otthonterkep` `TERÜLET`→`plot_sqm` (14.0% otthonterkep coverage)
+
+### DB state (2026-06-26 09:16 UTC, backfill running)
+| Source | raw | listings | price | area | rooms | type | cond | heat | yb | tf | floor | balc | gps | la | plot |
+|--------|:-----:|:-------:|:----:|:----:|:----:|:---:|:----:|:----:|:--:|:--:|:-----:|:----:|:---:|:--:|:---:|
+| jofogas | 1,784 | 1,784 | 99.9 | 99.8 | 97.5 | 100 | 96.4 | 96.9 | 9.7 | 10.9 | 86.0 | 97.6 | 100 | 100 | 0 |
+| otthonterkep | 1,815 | 1,616 | 98.8 | 79.3 | 83.9 | 99.0 | 99.0 | 58.7 | 5.7 | 37.3 | 0.0 | 0.2 | 62.8 | 0 | 14.0 |
+| **Total** | **3,599** | **3,400** | | | | | | | | | | | | |
+
+### Git
+- 9 commits today (main@505e2ae)
+- `migrations/005_parser_fixes.sql` documents column widening + view recreation
+- Pushed to GitHub
+
+### Remaining gaps (still open)
+1. **Otthonterkep backfill**: 5K target, ~1.8K/5K done, ~70 min remaining
+2. **Jofogas backfill**: ~4,200 remaining (crashed at 606 on v6 launch)
+3. **listed_at for otthonterkep**: 0% — SSR gap, needs Playwright (no date in HTML)
+4. **balcony_sqm for otthonterkep**: 0.2% — SSR gap
+5. **year_built for both**: ~7-9% — low data availability
+6. **Entity resolution**: 0 cross-portal matches (496 properties, 1:1 ratio)
+7. **GPS for otthonterkep**: 62.8% — backfill adding unmatched cities

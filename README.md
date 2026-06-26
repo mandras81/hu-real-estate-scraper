@@ -17,8 +17,9 @@
 python3 src/scrape_jofogas.py --incremental 1000
 python3 src/scrape_otthonterkep.py --incremental 1000
 
-# Full backfill (all ~6K jofogas)
+# Full backfill
 python3 src/scrape_jofogas.py 6000
+python3 src/scrape_otthonterkep.py --incremental 5000
 ```
 
 ---
@@ -42,40 +43,32 @@ HTTP (requests) → SSR HTML → raw JSON → raw_listings (staging table)
 
 ---
 
-## Current State (2026-06-26 03:52 UTC)
+## Current State (2026-06-26 09:16 UTC)
 
-| Source | Active Market | Collected | Strategy | Time to Full |
-|--------|:------------:|:--------:|----------|:-----------:|
-| **jofogas** | ~6,000 (lakás+ház+garázs) | **893** | Listing page sweep `/{cat}?o=N` + incremental | ✔ Backfill running |
-| **otthonterkep** | ~70,000 (96% live) | 199 | Sitemap crawl 5K/day | ~14 days |
-| **Total** | **~76,000** | **1,092** | Polite daily pipeline | **~14 days** |
+| Source | Active Market | Collected | Strategy | Progress |
+|--------|:------------:|:--------:|----------|:-------:|
+| **jofogas** | ~6,000 | **1,784** | Listing page sweep `/{cat}?o=N` + incremental | ✔ Complete |
+| **otthonterkep** | ~73,000 | **1,615** (±200/h) | Sitemap crawl 5K/day @ `--incremental` | ▶ 1.8K/5K backfill |
+| **Total** | **~79,000** | **3,399** | Polite daily pipeline | **⏳ ~14 days** |
 
-### Field Coverage (live, n=1,092)
-| Field | jofogas (893) | otthonterkep (199) | Notes |
-|-------|:--------:|:----------:|-------|
-| price | 892 (99.9%) | 199 (100%) | ✅ |
-| area_sqm | 890 (99.7%) | 192 (96.5%) | ✅ |
-| rooms | 849 (95.1%) | 137 (68.8%) | 🟡 medium |
-| listing_type | 893 (100%) | 192 (96.5%) | ✅ |
-| property_type | 893 (100%) | 189 (95.0%) | ✅ |
-| condition | 842 (94.3%) | 192 (96.5%) | ✅ |
-| heating | 844 (94.5%) | 92 (46.2%) | 🟡 medium |
-| **year_built** | **71 (8.0%)** | **26 (13.1%)** | 🔴 broken |
-| **listed_at** | **893 (100%)** | **0 (0%)** | 🔴 otthonterkep broken |
-| lat/lng | 893 (100%) | 192 (96.5%) | ✅ |
-| balcony_sqm | 851 (95.3%) | 2 (1.0%) | 🟡 medium |
-| **total_floors** | **195 (21.8%)** | **0 (0%)** | 🔴 otthonterkep missing |
-| floor | 645 (72.2%) | 35 (17.6%) | 🟡 medium |
-| seller_type | 893 (100%) | 192 (96.5%) | ✅ |
-
-### Listing Types
-| Type | Count | % |
-|------|-------|---|
-| sell | ~920 | ~84% |
-| rent | ~140 | ~13% |
-| NULL | ~32 | ~3% |
-
-### raw_listings staging: ~1,100 rows
+### Field Coverage (live active listings, n=3,400)
+| Field | jofogas (1,784) | otthonterkep (1,616) | Δ since 06-26 03:52 |
+|-------|:----------:|:--------------:|:---:|
+| price | 99.9% | 98.8% | — |
+| area_sqm | 99.8% | 79.3% | ⬆ backfill adding data |
+| rooms | 97.5% | 83.9% | ⬆ |
+| listing_type | 100% | 99.0% | — |
+| property_type | 100% | 98.6% | ⬆ |
+| condition | 96.4% | 99.0% | — |
+| heating | 96.9% | 58.7% | ⬆ (+12pp) |
+| **year_built** | **9.7%** | **5.7%** | 🟡 low both sides |
+| **listed_at** | **100%** | **0%** | ⚠️ SSR gap (needs Playwright) |
+| lat/lng | 100% | 62.8% | ⬆ geocoding backlog |
+| balcony_sqm | 97.6% | **0.2%** | ⚠️ SSR gap |
+| **total_floors** | **10.9%** | **37.3%** | ✨ fixed in 005 |
+| floor | **86.0%** | **0.0%** | jofogas fine, otthonterkep SSR |
+| **plot_sqm** | **0%** | **14.0%** | ✨ new field (005) |
+| seller_type | 100% | 99.0% | — |
 
 ---
 
@@ -86,14 +79,16 @@ HTTP (requests) → SSR HTML → raw JSON → raw_listings (staging table)
 | `real_estate_scraper` | 10.10.10.103:5432 | Scraped listings |
 | `upwork_pipeline` | 10.10.10.103:5432 | Upwork score pipeline |
 
+Connections via Vault dynamic credentials (`scraper-app` role, 1h lease) or static KV.
+
 ---
 
 ## Tables
 
 | Table | Purpose | Rows |
 |-------|---------|------|
-| `raw_listings` | Staging — raw JSON per source | ~1,100 |
-| `listings` | Canonical — 20+ parsed fields | 1,092 |
+| `raw_listings` | Staging — raw JSON per source | ~3,600 |
+| `listings` | Canonical — 20+ parsed fields | 3,400 |
 | `properties` | Golden records (consolidated entities) | 496 |
 | `property_matches` | Cross-portal match candidates | 0 |
 | `property_sources` | Links listings → properties | — |
@@ -106,10 +101,10 @@ HTTP (requests) → SSR HTML → raw JSON → raw_listings (staging table)
 
 **Schedule**: `0 5 * * *` (CET, via system crontab)
 
-1. `scrape_jofogas.py --incremental` — listing-page sweep, skips existing URLs
-2. `scrape_otthonterkep.py --incremental` — sitemap crawl
-3. `refresh_listings()` — PL/pgSQL parses raw JSON → canonical listings
-4. `refresh_consolidation()` — PL/pgSQL entity resolution
+1. `scrape_jofogas.py --incremental` — listing-page sweep, skips existing URLs  
+2. `scrape_otthonterkep.py --incremental` — sitemap crawl  
+3. `refresh_listings()` — PL/pgSQL parses raw JSON → canonical listings  
+4. `refresh_consolidation()` — PL/pgSQL entity resolution  
 
 Logs: `/tmp/realestate-cron.log`
 
@@ -119,15 +114,16 @@ Logs: `/tmp/realestate-cron.log`
 
 ### jofogas.hu 🟢 (SSR JSON)
 - **Method**: `requests` → listing page pagination `/{lakas,haz,garazs}?o=N`
-- **Data**: `__NEXT_DATA__` JSON → product price, parameters, GPS, images, listed_at
+- **Data**: `__NEXT_DATA__` JSON → price, parameters, GPS, images, listed_at
 - **Market**: ~5K lakás (201 pg), ~940 ház (38 pg), ~90 garázs (4 pg) = **~6,000 active**
-- **v6 Update**: Replaced broken sitemap with real listing-page sweep. Incremental mode. Sorted newest-first.
+- **v6**: Listing-page sweep (replaces broken sitemap). Incremental mode. Sorted newest-first.
 
 ### otthonterkep.hu 🟢 (SSR HTML)
-- **Method**: `requests` → sitemap XML (3 parts) → listing pages → page_data JSON + bootstrap_grid
+- **Method**: `requests` → sitemap XML (3 parts, ~73K URLs) → listing pages
+- **Data**: `page_data` JSON + `bootstrap_grid` + `property_summary` + `jsonld` (org-level only)
 - **GPS**: Nominatim geocoding via `city_coordinates` lookup table
-- **Sitemap**: ~75K URLs at `new.ingatlantajolo.hu/sitemap/`, 96% live
-- **Fixes needed**: `listed_at` (SSR, date extraction), `balcony_sqm`, `heating` coverage
+- **96% live**: 48/50 sampled sitemap URLs redirect 200 → valid listing
+- **Incremental**: `--incremental` skips existing URLs via DB query before sitemap fetch
 
 ### ingatlan.com 🛑 (NOT SCRAPED)
 - **Legal**: ToS explicitly prohibits scraping (clauses 9.4.8, 9.4.9, 9.4.10)
@@ -141,7 +137,7 @@ Logs: `/tmp/realestate-cron.log`
 | Path | Purpose |
 |------|---------|
 | `src/scrape_jofogas.py` | Dumb collector: listing-pages → `__NEXT_DATA__` JSON (v6) |
-| `src/scrape_otthonterkep.py` | Dumb collector: sitemap → SSR JSON (v5) |
+| `src/scrape_otthonterkep.py` | Dumb collector: sitemap → SSR JSON (v5, `--incremental`) |
 | `src/db.py` | Minimal: `get_conn()` + clean_* helpers |
 | `src/pii_filter.py` | Regex-based PII removal before DB insert |
 | `src/daily_pipeline.py` | Orchestrator: scrape → parse → consolidate |
@@ -150,42 +146,62 @@ Logs: `/tmp/realestate-cron.log`
 | `migrations/001_raw_listings.sql` | raw_listings staging + PL/pgSQL parse functions |
 | `migrations/002_consolidation_layer.sql` | Properties + entity resolution |
 | `migrations/003_city_geocode.sql` | City geocoding + HU→EN property_type |
+| `migrations/004_analytics_views.sql` | Field coverage, price stats, city views |
+| `migrations/005_parser_fixes.sql` | total_floors, plot_sqm, area cap, overflow guards |
 | `PLAN.md` | Full implementation log (historical) |
 | `SCRAPING_PLAN.md` | Original reconnaissance & legal analysis |
 
 ---
 
-## Changelog (recent)
+## Changelog
 
-### 2026-06-25
-- **jofogas v6**: Listing-page sweep replaces broken sitemap. 63× more URLs (96→6,000).
-- **Parser fixes**: `floor_count`→`total_floors` (0%→38%), `building_date`→`year_built` (0%→12%)
-- **Incremental mode**: `--incremental` flag for daily runs
-- **Vault creds**: Dynamic PG roles wired into all scripts
+### 2026-06-26 — otthonterkep Backfill + Parser Overhaul
+- **otthonterkep `--incremental`**: New mode skips existing URLs — 73K total, only fresh scraped  
+- **Backfill launched**: 5K listings (~45/min, ~73 min runtime)  
+- **Parser fix 005**: Belső szintek → total_floors (was floor — 603 records vs 0)  
+- **Parser fix 005**: TERÜLET → plot_sqm (recovered 227 records)  
+- **area_sqm cap**: 5–5000 m² sanity filter (rejects plot-sized bogus values)  
+- **price_per_sqm guard**: Cap at 10M HUF/sqm to avoid NUMERIC overflow  
+- **Column widening**: price_per_sqm NUMERIC(8,1)→12,1, area_sqm→10,1, plot_sqm→12,1  
+- **daily_pipeline.py**: uses `--incremental` for otthonterkep  
+- **Git**: 9 commits pushed (main@505e2ae)
 
-### 2026-06-24
-- Architecture reset: dumb collectors + PL/pgSQL parsing
-- Consolidation layer (migrations 002-003)
-- PII filter, GPS geocoding, pgadmin fix
+### 2026-06-25 — jofogas v6 + Field Coverage Audit
+- **jofogas v6**: Listing-page sweep replaces broken sitemap. 63× more URLs (96→6,000).  
+- **Parser fixes**: floor_count→total_floors (0%→38%), building_date→year_built (0%→12%)  
+- **Incremental mode**: `--incremental` flag for daily runs  
+- **Vault creds**: Dynamic PG roles wired into all scripts  
+
+### 2026-06-24 — Architecture Reset
+- Dumb collectors + PL/pgSQL parsing architecture  
+- Consolidation layer (migrations 002-003)  
+- PII filter, GPS geocoding, pgadmin fix  
 
 ---
 
 ## Remaining TODOs
 
 ### Pipeline
-- [ ] **otthonterkep acceleration**: Bump to 5K/day → completes ~14 days
-- [ ] **Resume jofogas backfill**: ~5,400 remaining (process crashed at 606)
+- [ ] **otthonterkep acceleration**: 5K/day target → completes ~14 days *(backfill running)*
+- [ ] **Resume jofogas backfill**: ~4,200 remaining (process crashed at 606)
 - [ ] **New listing discovery**: Daily jofogas listing page diff
 
 ### Data quality
-- [ ] **Fix listed_at for otthonterkep** (0% — SSR date extraction needed)
-- [ ] **Fix balcony_sqm for otthonterkep** (1% — property_summary)
-- [ ] **Fix total_floors for otthonterkep** (0% — bootstrap grid)
-- [ ] **Fix floor for otthonterkep** (17.6% — property_summary)
-- [ ] **Fix heating for otthonterkep** (46.2% — bootstrap grid)
-- [ ] **Fix year_built for jofogas** (8% — building_date only partial)
+- [ ] **Fix listed_at for otthonterkep** (0% — SSR gap, needs Playwright)
+- [ ] **Fix balcony_sqm for otthonterkep** (0.2% — SSR gap)
+- [ ] **Fix heating for otthonterkep** (58.7% — improving with data)
+- [ ] **Fix year_built for both** (~7-9% — low coverage)
+- [ ] **GPS geocoding for otthonterkep** (62.8% — backfill adding unmatched cities)
 
 ### Upstream
-- [ ] **Analytics views** — price trends, city coverage, field completeness
-- [ ] **Auto-confirm improvements** — entity resolution thresholds
 - [ ] **Entity resolution** — cross-portal dedup after full inventory
+- [ ] **Auto-confirm thresholds** — tune property_matches scoring
+
+---
+
+## Git
+
+```text
+origin	git@github.com:mandras81/hu-real-estate-scraper.git (fetch)
+origin	git@github.com:mandras81/hu-real-estate-scraper.git (push)
+```
